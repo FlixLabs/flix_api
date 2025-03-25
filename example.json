@@ -1,0 +1,13 @@
+[
+  {
+    "name": null,
+    "radarr": {
+      "base_url": null,
+      "api_key": null
+    },
+    "sonarr": {
+      "base_url": null,
+      "api_key": null
+    }
+  }
+]
