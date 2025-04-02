@@ -6,7 +6,7 @@
   "private": true,
   "type": "module",
   "main": "app.js",
-  "license": "MIT",
+  "license": "GPLv3",
   "scripts": {
     "start": "node --env-file=.env app.js"
   },
