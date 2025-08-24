@@ -39,6 +39,19 @@ app.get('/auth', (req, res) => {
   })();
 })
 
+app.get('/color', (req, res) => {
+  (async () => {
+    let data = {};
+    const instanceData = await redisClient.json.get('color');
+
+    if (instanceData) {
+      data = instanceData;
+    }
+
+    res.send(data);
+  })();
+})
+
 app.post('/auth', (req, res) => {
   (async () => {
     const data = req.body
@@ -50,9 +63,28 @@ app.post('/auth', (req, res) => {
   })();
 })
 
+app.post('/color', (req, res) => {
+  (async () => {
+    const data = req.body
+    if (data.primary) {
+      await redisClient.json.set('color', '$', data);
+    }
+
+    res.sendStatus(200);
+  })();
+})
+
 app.delete('/auth', (req, res) => {
   (async () => {
     await redisClient.json.del('auth');
+
+    res.sendStatus(200);
+  })();
+})
+
+app.delete('/color', (req, res) => {
+  (async () => {
+    await redisClient.json.del('color');
 
     res.sendStatus(200);
   })();

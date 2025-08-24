@@ -7,7 +7,8 @@
 ## Features
 
 - **Multi-Instance Management** for Radarr and Sonarr
-- **Basic Authentication** options for enhanced security
+- **Authentication** options for enhanced security
+- **Color** options for enhanced UI
 
 This project is developed entirely in my free time, and while it is already functional, improvements in **security** and **code factorization** are always welcome. Contributions and feedback are greatly appreciated!
 

@@ -3,11 +3,13 @@
     "name": null,
     "radarr": {
       "base_url": null,
-      "api_key": null
+      "api_key": null,
+      "root_folder_path": null
     },
     "sonarr": {
       "base_url": null,
-      "api_key": null
+      "api_key": null,
+      "root_folder_path": null
     }
   }
 ]
