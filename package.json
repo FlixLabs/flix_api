@@ -11,8 +11,8 @@
     "start": "node --env-file=.env app.js"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "express": "^4.21.2",
-    "redis": "^4.7.0"
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "redis": "^5.11.0"
   }
 }
