@@ -1,0 +1,20 @@
+FROM node:20-bullseye-slim AS build
+
+WORKDIR /api
+
+COPY package.json yarn.lock ./
+RUN yarn install --frozen-lockfile --production=true
+
+COPY . .
+
+FROM node:20-bullseye-slim
+
+WORKDIR /api
+
+ENV NODE_ENV=production
+
+COPY --from=build /api /api
+
+EXPOSE 3000
+
+CMD ["yarn", "start"]
