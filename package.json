@@ -8,7 +8,8 @@
   "main": "app.js",
   "license": "GPLv3",
   "scripts": {
-    "start": "node --env-file=.env app.js"
+    "start": "node app.js",
+    "start:dev": "node --env-file=.env app.js"
   },
   "dependencies": {
     "cors": "^2.8.6",
