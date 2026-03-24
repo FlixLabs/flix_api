@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: ${API_DOCKERFILE}
     restart: unless-stopped
+    env_file:
+      - .env
     ports:
       - ${API_PORT}:3000
     environment:
