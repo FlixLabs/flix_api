@@ -1,4 +1,4 @@
-FROM node:20-bullseye-slim AS build
+FROM node:24-bookworm-slim AS build
 
 WORKDIR /api
 
@@ -7,7 +7,7 @@ RUN yarn install --frozen-lockfile --production=true
 
 COPY . .
 
-FROM node:20-bullseye-slim
+FROM node:24-bookworm-slim
 
 WORKDIR /api
 

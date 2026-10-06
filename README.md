@@ -20,6 +20,8 @@ This project is developed entirely in my free time, and while it is already func
 
 ## Project Setup
 
+Use Node.js 24 LTS and Yarn Classic (1.x).
+
 ```sh
 yarn
 ```

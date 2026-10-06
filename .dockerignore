@@ -1,0 +1,9 @@
+.git
+node_modules
+.env
+.env.*
+!.env.dist
+instances.json
+redis
+repo-mirror
+deploy-agent
