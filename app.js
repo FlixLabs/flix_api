@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import * as fs from 'fs';
 import { createClient } from 'redis';
+import { createStorageRouter, publicInstances } from './storage.js';
 
 const app = express();
 const port = 3000;
@@ -90,11 +91,13 @@ app.delete('/color', (req, res) => {
   })();
 })
 
+app.use(createStorageRouter(() => redisClient.json.get(process.env.INSTANCE_FILE)));
+
 app.get('/instances', (req, res) => {
   (async () => {
     const instanceData = await redisClient.json.get(process.env.INSTANCE_FILE);
 
-    res.send(instanceData);
+    res.send(publicInstances(instanceData));
   })();
 })
 
