@@ -1,0 +1,35 @@
+services:
+  storage-agent:
+    build: .
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      STORAGE_AGENT_TOKEN: ${STORAGE_AGENT_TOKEN:?Set STORAGE_AGENT_TOKEN}
+    ports:
+      - "${STORAGE_AGENT_BIND_IP:?Set STORAGE_AGENT_BIND_IP}:${STORAGE_AGENT_PORT:?Set STORAGE_AGENT_PORT}:9010"
+    volumes:
+      - type: bind
+        source: ${STORAGE_MOVIES_PATH:?Set STORAGE_MOVIES_PATH}
+        target: /storage/movies
+        read_only: true
+        bind:
+          create_host_path: false
+          propagation: rslave
+      - type: bind
+        source: ${STORAGE_SERIES_PATH:?Set STORAGE_SERIES_PATH}
+        target: /storage/series
+        read_only: true
+        bind:
+          create_host_path: false
+          propagation: rslave
+      - type: bind
+        source: ${STORAGE_DOWNLOADS_PATH:?Set STORAGE_DOWNLOADS_PATH}
+        target: /storage/downloads
+        read_only: true
+        bind:
+          create_host_path: false
+          propagation: rslave
