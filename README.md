@@ -31,3 +31,15 @@ yarn
 ```sh
 yarn start
 ```
+
+### Storage Agent (Optional)
+
+To measure the actual movie, series and download filesystems, deploy the
+[storage agent](storage-agent/README.md) on their host. It uses read-only mounts
+and a bearer token, without access to the Docker socket.
+
+### Tests
+
+```sh
+yarn test
+```
