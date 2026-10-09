@@ -6,6 +6,7 @@ COPY package.json yarn.lock ./
 RUN yarn install --frozen-lockfile --production=true
 
 COPY . .
+RUN yarn test
 
 FROM node:24-bookworm-slim
 
