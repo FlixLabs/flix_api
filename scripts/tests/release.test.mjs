@@ -6,6 +6,19 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = resolve(import.meta.dirname, '../..');
+
+test('mirrors push only branches and filtered tags', () => {
+  const ci = readFileSync(join(root, '.gitlab-ci.yml'), 'utf8');
+  for (const job of ['mirror-gitlab', 'mirror-github']) {
+    const config = ci.split(`\n${job}:\n`)[1].split(/\n[a-z][a-z-]*:\n/)[0];
+    assert.match(config, /git filter-branch --tag-name-filter cat/);
+    const push = config.split('\n').find(line => line.includes('git push'));
+    assert.match(push, /git push --prune --force/);
+    assert.match(push, /\+refs\/heads\/\*:refs\/heads\/\* \+refs\/tags\/\*:refs\/tags\/\*/);
+    assert.doesNotMatch(push, /--mirror|refs\/merge-requests|refs\/pipelines/);
+  }
+});
+
 function fixture(t, version = '3.0.0') {
   const dir = mkdtempSync(join(tmpdir(), 'flix-release-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
