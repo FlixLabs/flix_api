@@ -1,5 +1,6 @@
 import { statfs, stat, readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import { storageFailure } from './diagnostics.js';
 
 const unescapeMount = value => value.replace(/\\([0-7]{3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)));
 
@@ -13,7 +14,7 @@ export function volumeIdentity(mountInfo, path) {
   }).filter(Boolean);
   const mount = mounts.filter(mount => path === mount.path || path.startsWith(mount.path.replace(/\/$/, '') + '/'))
     .sort((a, b) => b.path.length - a.path.length)[0];
-  if (!mount) throw new Error('Mount unavailable');
+  if (!mount) throw Object.assign(new Error('Mount unavailable'), { code: 'MOUNT_NOT_FOUND' });
   // The source may contain SSH usernames: only publish an opaque volume identifier.
   return createHash('sha256').update(mount.identity).digest('hex');
 }
@@ -24,7 +25,7 @@ export function filesystemMetrics(info) {
   const available = info.bavail * info.bsize;
   const used = total - free;
   if (total <= 0n || available < 0n || free < available || used < 0n || total > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error('Invalid filesystem metrics');
+    throw Object.assign(new Error('Invalid filesystem metrics'), { code: 'INVALID_METRICS' });
   }
   return {
     totalBytes: Number(total),
@@ -36,15 +37,15 @@ export function filesystemMetrics(info) {
   };
 }
 
-export async function collectStorage(locations) {
-  const mountInfo = await readFile('/proc/self/mountinfo', 'utf8');
+export async function collectStorage(locations, filesystem = { stat, statfs, readFile }) {
+  const mountInfo = await filesystem.readFile('/proc/self/mountinfo', 'utf8');
   const records = await Promise.all(locations.map(async ({ id, path }) => {
     try {
-      if (!(await stat(path)).isDirectory()) throw new Error('Not a directory');
-      const metrics = filesystemMetrics(await statfs(path, { bigint: true }));
+      if (!(await filesystem.stat(path)).isDirectory()) throw Object.assign(new Error('Not a directory'), { code: 'ENOTDIR' });
+      const metrics = filesystemMetrics(await filesystem.statfs(path, { bigint: true }));
       return { id, path, available: true, volumeId: volumeIdentity(mountInfo, path), ...metrics };
-    } catch {
-      return { id, path, available: false, error: 'Storage unavailable' };
+    } catch (error) {
+      return { id, path, available: false, ...storageFailure(error) };
     }
   }));
   return { collectedAt: new Date().toISOString(), locations: records };

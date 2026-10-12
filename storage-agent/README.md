@@ -26,6 +26,33 @@ SSHFS must already be mounted and readable by the container's unprivileged
 privileged. If the SSHFS mount is recreated, recreate the agent too and recheck
 the capacities. Bind propagation requires shared host mount propagation.
 
+### Storage Diagnostics
+
+Unavailable locations include a controlled `code`, such as `IO_ERROR`,
+`PERMISSION_DENIED`, `PATH_NOT_FOUND`, `STALE_MOUNT` or `MOUNT_DISCONNECTED`.
+Raw filesystem errors, host mount sources and credentials are never returned.
+One unavailable location does not discard measurements for healthy locations.
+Missing or invalid measurements are not interpreted as a full filesystem.
+
+For an I/O or stale-mount error, check the configured paths on the host first.
+If the host can read them but the agent cannot, recreate the agent to refresh
+its bind mounts:
+
+```sh
+docker compose up -d --force-recreate storage-agent
+docker compose exec storage-agent df -k /storage/movies /storage/series /storage/downloads
+```
+
+After upgrading this code, rebuild the agent on its storage host:
+
+```sh
+docker compose up -d --build --force-recreate storage-agent
+```
+
+Upgrade Flix API as well to forward the new diagnostic codes to the webapp.
+Older agents remain supported, but their generic errors cannot identify the
+specific filesystem failure. No restart or mount repair is triggered by Flix.
+
 Keep the agent on a private network; allow only the Flix API host through the
 firewall. HTTP does not encrypt the bearer token: use HTTPS through an existing
 reverse proxy or an encrypted private network when traffic crosses an untrusted
