@@ -4,7 +4,7 @@ import { storageFailure } from './storage-agent/diagnostics.js';
 export function publicInstances(instances) {
   return (instances || []).map(({ storage_agent, download_clients, download_clients_token, ...instance }) => ({
     ...instance,
-    ...(Array.isArray(download_clients) && download_clients.length && download_clients_token ? { has_download_clients: true } : {}),
+    ...(Array.isArray(download_clients) && download_clients.length ? { has_download_clients: true } : {}),
     has_storage_agent: Boolean(storage_agent?.base_url && storage_agent?.token),
   }));
 }

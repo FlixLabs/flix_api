@@ -1,6 +1,6 @@
 {
   "name": "flix_api",
-  "version": "1.2.0",
+  "version": "2.0.0",
   "description": "",
   "author": "Renaud Baivier",
   "private": true,
@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "cors": "^2.8.6",
+    "crypto-js": "^4.2.0",
     "express": "^5.2.1",
     "redis": "^5.12.1"
   },

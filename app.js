@@ -1,4 +1,5 @@
 import express from 'express';
+import { createAuthentication } from './auth.js';
 import cors from 'cors';
 import * as fs from 'fs';
 import { createClient } from 'redis';
@@ -28,18 +29,8 @@ redisClient.on('error', (err) => {
   console.error('Redis error:', err);
 });
 
-app.get('/auth', (req, res) => {
-  (async () => {
-    let data = {};
-    const instanceData = await redisClient.json.get('auth');
-
-    if (instanceData) {
-      data = instanceData;
-    }
-
-    res.send(data);
-  })();
-})
+const authentication = createAuthentication(redisClient);
+app.use(authentication.router);
 
 app.get('/color', (req, res) => {
   (async () => {
@@ -54,18 +45,7 @@ app.get('/color', (req, res) => {
   })();
 })
 
-app.post('/auth', (req, res) => {
-  (async () => {
-    const data = req.body
-    if (data.username && data.password) {
-      await redisClient.json.set('auth', '$', data);
-    }
-
-    res.sendStatus(200);
-  })();
-})
-
-app.post('/color', (req, res) => {
+app.post('/color', authentication.requireSession, (req, res) => {
   (async () => {
     const data = req.body
     if (data.primary) {
@@ -76,15 +56,7 @@ app.post('/color', (req, res) => {
   })();
 })
 
-app.delete('/auth', (req, res) => {
-  (async () => {
-    await redisClient.json.del('auth');
-
-    res.sendStatus(200);
-  })();
-})
-
-app.delete('/color', (req, res) => {
+app.delete('/color', authentication.requireSession, (req, res) => {
   (async () => {
     await redisClient.json.del('color');
 
@@ -92,10 +64,12 @@ app.delete('/color', (req, res) => {
   })();
 })
 
+app.use('/storage', authentication.requireSession);
+app.use('/download-clients', authentication.requireSession);
 app.use(createStorageRouter(() => redisClient.json.get(process.env.INSTANCE_FILE)));
 app.use(createDownloadClientsRouter(() => redisClient.json.get(process.env.INSTANCE_FILE)));
 
-app.get('/instances', (req, res) => {
+app.get('/instances', authentication.requireSession, (req, res) => {
   (async () => {
     const instanceData = await redisClient.json.get(process.env.INSTANCE_FILE);
 

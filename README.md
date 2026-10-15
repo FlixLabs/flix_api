@@ -24,7 +24,6 @@ Add these optional fields to an instance in `instances.json`:
 
 ```json
 {
-  "download_clients_token": "replace-with-a-random-token-at-least-32-characters-long",
   "download_clients": [{
     "id": "main",
     "name": "My Deluge",
@@ -36,27 +35,56 @@ Add these optional fields to an instance in `instances.json`:
 }
 ```
 
-Merge these fields into your existing instance; keep its `name`, `radarr` and
-`sonarr` settings. Generate a random token with `openssl rand -hex 32` and use it
-in Flix's **Downloads > Download clients** dialog. It is independent of deployment
-and storage-agent tokens. The browser keeps it only until the dialog closes.
-Restart/redeploy the API to reload the instance configuration. Deluge Web must be
-running and already connected to the intended daemon; Flix never automatically
-selects a daemon. `base_url` is the Web UI base URL, without `/json`.
+Merge these fields into your existing instance; keep its name, Radarr and Sonarr settings.
+Restart/redeploy the API to reload it. Deluge Web must already be connected to the
+intended daemon; the URL is the Web UI base URL without /json.
 
-Client passwords, endpoints and access tokens are never returned by `/instances`.
-Protect the API with HTTPS or a trusted private network. Never publish the instance
-file. Every client endpoint requires `Authorization: Bearer <download_clients_token>`.
-GET `/download-clients/:instance` lists client capabilities and normalized torrents;
-DELETE `/download-clients/:instance/:client/:torrent` requires JSON
-`{"name":"exact current torrent name","deleteData":false}`.
+Download clients use the Flix login session, not a separate access token. The old
+`download_clients_token` can be removed from instances.json (it is ignored and never
+returned). The webapp loads clients when the panel opens.
+
+### Flix Authentication (API 2.0.0 / Webapp 3.21.0)
+
+Deploy the API and webapp together. GET /auth returns only account metadata, never
+a password or password hash. POST /session verifies the username/password on the
+API and issues a random session; DELETE /session revokes it. Passwords are salted
+and hashed with asynchronous scrypt. Sessions are stored as digests in Redis with
+a 30-day expiry and are invalidated by password changes. Sign-in attempts are
+rate limited. Redis persistence is required to retain accounts across restarts.
+
+For an existing encrypted account, temporarily add `AUTH_LEGACY_CRYPT_KEY` to the
+API environment, with the exact former webapp `VITE_CRYPT_KEY` value. Recreate the
+API container to load this new environment variable (restarting alone does not
+update container environment). Sign in with the usual Flix username/password.
+The API migrates the account to a salted hash atomically after verification; then
+the migration key may be removed. No password reset or extra client token is needed.
+CryptoJS is used only for this legacy migration, not for new password storage.
+
+The webapp remembers the Flix session in this browser's local storage, separately
+for each API URL; it works across reloads and browser restarts. It is accessible
+to same-origin JavaScript: use a trusted webapp origin and HTTPS, and avoid shared
+browser profiles. A session expires after 30 days, on sign-out or on account change.
+Do not publish credentials or include session tokens in VITE build variables.
+
+When Flix authentication is disabled, the API intentionally operates in public
+mode, including client actions. Only use this mode on a trusted private network;
+enable Flix authentication before exposing the API. CORS is not authorization.
+The API now protects instances, storage, download clients and settings writes.
+Direct Radarr/Sonarr browser connections retain their existing API-key model.
 
 Before each removal, Flix rereads the torrent and every configured instance's
-Radarr/Sonarr queues, including all pages. Active or tracked torrents cannot be
-removed. A queue/authentication/daemon failure blocks cleanup. Untracked does not
-prove import completion: seeding torrents can still be useful, and another app or
-an unconfigured service may depend on them. Queue state can also change after
-verification; no cross-service atomic transaction is possible.
+Radarr/Sonarr queues, including all pages. Incomplete torrents and unverifiable
+tracking remain blocked. Completed tracked torrents require an explicit force
+confirmation (DELETE body `force: true`); this may interrupt import and does not
+clear Radarr/Sonarr queue entries or remove media from the library. The optional
+force flag must be boolean. It never bypasses permissions to delete files.
+
+Untracked does not prove import completion or that deletion is safe. Uncertain
+write results are never retried automatically. No cross-service atomic transaction
+is possible between Deluge and Radarr/Sonarr.
+
+Implementation references: [Node crypto](https://nodejs.org/api/crypto.html) and
+[Express security](https://expressjs.com/en/advanced/best-practice-security.html).
 
 Files are kept by default. Only set `allow_delete_data: true` after checking your
 download/library paths and sharing setup; enabling it allows an additional explicit
