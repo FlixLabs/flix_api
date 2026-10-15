@@ -3,6 +3,7 @@ import cors from 'cors';
 import * as fs from 'fs';
 import { createClient } from 'redis';
 import { createStorageRouter, publicInstances } from './storage.js';
+import { createDownloadClientsRouter } from './download-clients/router.js';
 
 const app = express();
 const port = 3000;
@@ -92,6 +93,7 @@ app.delete('/color', (req, res) => {
 })
 
 app.use(createStorageRouter(() => redisClient.json.get(process.env.INSTANCE_FILE)));
+app.use(createDownloadClientsRouter(() => redisClient.json.get(process.env.INSTANCE_FILE)));
 
 app.get('/instances', (req, res) => {
   (async () => {

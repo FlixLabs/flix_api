@@ -14,6 +14,62 @@ codex resume 019d0252-50ae-7110-935a-753841d46961
 
 ## Features
 
+### Download Clients (Optional)
+
+Flix API provides a connector-based interface for inspecting completed torrents.
+Deluge is the first supported connector; qBittorrent and Transmission are not yet
+implemented. Existing Radarr/Sonarr download actions remain independent.
+
+Add these optional fields to an instance in `instances.json`:
+
+```json
+{
+  "download_clients_token": "replace-with-a-random-token-at-least-32-characters-long",
+  "download_clients": [{
+    "id": "main",
+    "name": "My Deluge",
+    "type": "deluge",
+    "base_url": "http://deluge:8112",
+    "password": "replace-with-the-deluge-web-password",
+    "allow_delete_data": false
+  }]
+}
+```
+
+Merge these fields into your existing instance; keep its `name`, `radarr` and
+`sonarr` settings. Generate a random token with `openssl rand -hex 32` and use it
+in Flix's **Downloads > Download clients** dialog. It is independent of deployment
+and storage-agent tokens. The browser keeps it only until the dialog closes.
+Restart/redeploy the API to reload the instance configuration. Deluge Web must be
+running and already connected to the intended daemon; Flix never automatically
+selects a daemon. `base_url` is the Web UI base URL, without `/json`.
+
+Client passwords, endpoints and access tokens are never returned by `/instances`.
+Protect the API with HTTPS or a trusted private network. Never publish the instance
+file. Every client endpoint requires `Authorization: Bearer <download_clients_token>`.
+GET `/download-clients/:instance` lists client capabilities and normalized torrents;
+DELETE `/download-clients/:instance/:client/:torrent` requires JSON
+`{"name":"exact current torrent name","deleteData":false}`.
+
+Before each removal, Flix rereads the torrent and every configured instance's
+Radarr/Sonarr queues, including all pages. Active or tracked torrents cannot be
+removed. A queue/authentication/daemon failure blocks cleanup. Untracked does not
+prove import completion: seeding torrents can still be useful, and another app or
+an unconfigured service may depend on them. Queue state can also change after
+verification; no cross-service atomic transaction is possible.
+
+Files are kept by default. Only set `allow_delete_data: true` after checking your
+download/library paths and sharing setup; enabling it allows an additional explicit
+confirmation to delete data. Flix does not prove library-file isolation and cannot
+undo deletion. Lost write responses are reported as uncertain, never automatically
+retried. Verify the client and refresh before another attempt.
+
+New connectors implement `list()` and `remove(id, deleteData)` in `download-clients/`
+and register their connection factory and ID validator in `index.js`. No arbitrary RPC proxy is exposed.
+Deluge uses its [official Web JSON-RPC interface](https://deluge.readthedocs.io/en/deluge-2.2.0/devguide/how-to/curl-jsonrpc.html).
+
+### Core Features
+
 - **Multi-Instance Management** for Radarr and Sonarr
 - **Authentication** options for enhanced security
 - **Color** options for enhanced UI
