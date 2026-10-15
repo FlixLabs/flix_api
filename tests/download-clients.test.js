@@ -6,6 +6,9 @@ import { createDownloadClientsRouter } from '../download-clients/router.js';
 import { publicInstances } from '../storage.js';
 import { trackedDownloads, configuredClients } from '../download-clients/index.js';
 import { connectDeluge } from '../download-clients/connectors/deluge.js';
+import { createAuthentication, passwordRecord, authenticationFingerprint } from '../auth.js';
+import { authStore } from './helpers/auth-store.js';
+import { createHash } from 'node:crypto';
 
 const token = 'a'.repeat(64);
 const hash = 'b'.repeat(40);
@@ -13,6 +16,7 @@ const service = { base_url: 'http://service.test', api_key: 'private-key' };
 const client = { id: 'main', name: 'My client', type: 'deluge', base_url: 'http://deluge.test', password: 'private-password' };
 const instance = { name: 'Test', download_clients_token: token, download_clients: [client], radarr: service, sonarr: service };
 const torrent = { name: 'Completed film', state: 'Seeding', progress: 100, is_finished: true, total_size: 1e9, save_path: '/downloads', ratio: 2 };
+const auth = await passwordRecord('User', 'password');
 function remote(settings = {}) {
   const calls = [];
   const fetchRemote = async (url, options) => {
@@ -37,6 +41,10 @@ function remote(settings = {}) {
 async function server(t, settings = {}, instances = [instance]) {
   const mock = remote(settings);
   const app = express(); app.use(express.json());
+  const store = authStore(auth);
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  await store.set(`flix:session:${digest(token)}`, authenticationFingerprint(auth), { EX: 60 });
+  app.use('/download-clients', createAuthentication(store).requireSession);
   app.use(createDownloadClientsRouter(async () => instances, mock.fetchRemote));
   const http = createServer(app);
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
@@ -107,6 +115,19 @@ test('tracked torrents are blocked even after the browser displayed an untracked
   const { send, calls } = await server(t, { tracked: true });
   assert.equal((await send()).status, 409);
   assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+});
+test('forcing removal requires an explicit boolean and still validates the torrent and queues', async t => {
+  const tracked = await server(t, { tracked: true });
+  assert.equal((await tracked.send({ name: torrent.name, deleteData: false, force: 'true' })).status, 400);
+  assert.equal((await tracked.send({ name: torrent.name, deleteData: false, force: true })).status, 204);
+  assert.deepEqual(tracked.calls.find(call => call.method === 'core.remove_torrent').params, [hash, false]);
+  for (const settings of [{ queueFailure: true }, { torrent: { progress: 50, is_finished: false } }, { empty: true }]) {
+    const blocked = await server(t, settings);
+    assert.notEqual((await blocked.send({ name: torrent.name, deleteData: false, force: true })).status, 204);
+    assert.ok(!blocked.calls.some(call => call.method === 'core.remove_torrent'));
+  }
+  const forbiddenData = await server(t, { tracked: true });
+  assert.equal((await forbiddenData.send({ name: torrent.name, deleteData: true, force: true })).status, 403);
 });
 test('queue or daemon failures fail closed with sanitized errors', async t => {
   for (const settings of [{ queueFailure: true }, { connected: false }, { login: false }, { torrent: { progress: null } }]) {

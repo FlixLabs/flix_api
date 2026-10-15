@@ -1,7 +1,6 @@
 [
   {
     "name": null,
-    "download_clients_token": null,
     "download_clients": [],
     "radarr": {
       "base_url": null,
