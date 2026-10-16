@@ -123,6 +123,99 @@ To measure the actual movie, series and download filesystems, deploy the
 [storage agent](storage-agent/README.md) on their host. It uses read-only mounts
 and a bearer token, without access to the Docker socket.
 
+### User Invitations (API Required)
+
+Invited accounts use administrator/user permissions and Mailjet invitation
+delivery. Existing administrator credentials and sessions remain compatible. Guests
+cannot read `/instances`, storage, download clients or administrator settings.
+The administrator must enable authentication before creating invitations.
+
+Configure these variables **in the API container environment**, never in `VITE_*`:
+
+```dotenv
+MAILJET_API_KEY=your-public-api-key
+MAILJET_SECRET_KEY=your-secret-api-key
+MAIL_FROM_EMAIL=flix@example.com
+MAIL_FROM_NAME=Flix
+FLIX_PUBLIC_URL=https://flix.example.com
+```
+
+Use an address/domain verified in Mailjet. The implementation uses
+[Mailjet Send API v3.1](https://dev.mailjet.com/docs/email-api/send-api-v31/send-basic-email),
+including per-message result validation. Use HTTPS for an externally accessible
+deployment. Persist and back up Redis: accounts and the invitation outbox use
+Redis, not `instances.json`.
+
+Administrators manage invitations and guest access from **Users** in the webapp.
+Guests sign in using their email in the username field. Invitations expire after
+seven days, are single-use and cannot choose their role or recipient email.
+Passwords use scrypt, sessions are stored by token hash, and access revocation
+invalidates all the user's sessions. Authentication cannot be disabled while
+active guests or pending invitations remain.
+If the administrator record is lost while guests/invitations remain, protected
+routes fail closed rather than reverting to public access; restore that record
+from the Redis backup.
+
+Invitation creation queues mail without waiting for Mailjet. A worker checks the
+durable outbox every ten seconds, with a Redis lease across API replicas. Failed
+sends retry with exponential backoff, up to five attempts. Delivery status is
+visible in **Users**; use Refresh to update it. After a permanent failure, revoke
+the invitation and create another. Delivery is at-least-once: a crash after
+Mailjet acceptance can send the same invitation email again, but the link still
+only creates one account. `sent` means Mailjet accepted the message, not that the
+recipient inbox received it.
+
+Invitation tokens are hashed for validation and encrypted in the pending outbox
+using a key derived from `MAILJET_SECRET_KEY`. Rotating that secret requires
+revoking and recreating queued invitations. The acceptance link carries its
+secret in a URL fragment, which the webapp clears on opening. Do not share
+invitation links publicly.
+
+### Film and Series Requests
+
+API 2.2.0 and webapp 3.25.0 add a **Requests** page for invited users and the
+administrator. Configure `TMDB_API_KEY` in the API container environment (the same
+TMDB application key may be used by the webapp). It is independent of the
+webapp's build-time `VITE_TMDB_API_KEY`. No new browser access to Radarr/Sonarr is
+required for guests. Never expose their service API keys in client configuration.
+
+- Search films/series in TMDB, inspect availability and request a film, selected
+  seasons, or the entire series including future seasons.
+- Exact media/scope duplicates share one persistent request and multiple
+  subscribers. Guests only see their own list and cannot see other subscribers
+  or service targets. Metadata and external IDs are resolved on the server;
+  client-supplied titles, credentials, URLs and roles are never trusted.
+- Administrators approve or refuse from **All requests**, with an optional refusal
+  reason. Approval selects a configured instance, native quality profile and
+  native root folder, validated again on the server.
+- New titles are added monitored, with a native missing-media search. Existing
+  titles keep their quality profile and path. Season-specific requests preserve
+  unrelated seasons; whole-series requests also monitor future seasons. Specials
+  are not included. TMDB seasons not yet present in Sonarr cannot be approved yet.
+- Approval means Radarr/Sonarr accepted the addition/monitoring, not that a release
+  was downloaded. An unavailable future release can remain approved while waiting.
+- Availability checks run in the API every minute (up to five due requests per
+  pass), and the visible list refreshes every 30 seconds/on focus. Provider failures
+  preserve the last confirmed status and flag it as unverified.
+- Mutations are never automatically replayed after a timeout. **Needs review**
+  requires an explicit **Check service**: a read-only check either confirms the
+  monitored media or returns an absent item to pending approval. If the media
+  exists but monitoring cannot be confirmed, inspect Radarr/Sonarr directly.
+
+Requests use Redis compare-and-swap and a worker lease; keep Redis persistence
+and backups enabled. Approval claims are durable and concurrent approvals cannot
+trigger the same request twice. Stalled approvals become **Needs review** after
+three minutes, checked at the next worker pass. Catalog access and submissions
+are rate-limited per user; requests are capped at 5,000 records. Exact season
+scopes are grouped; overlapping scopes can have separate requests, but native
+identity checks prevent duplicate Radarr/Sonarr library entries.
+
+Search uses [TMDB](https://developer.themoviedb.org/reference/search-movie).
+Approval uses the native [Radarr](https://radarr.video/docs/api/) and
+[Sonarr](https://sonarr.tv/docs/api/) APIs, not download-client credentials.
+**Request notifications are not part of this stage**: Mailjet currently sends
+invitations only. In-app/email request notifications follow on a separate branch.
+
 ### Tests
 
 ```sh
