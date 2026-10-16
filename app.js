@@ -1,6 +1,7 @@
 import express from 'express';
 import { createAuthentication } from './auth.js';
 import { createAccounts } from './accounts.js';
+import { createMediaRequests } from './media-requests/router.js';
 import cors from 'cors';
 import * as fs from 'fs';
 import { createClient } from 'redis';
@@ -35,6 +36,9 @@ const authentication = createAuthentication(redisClient, { accounts });
 app.use(authentication.router);
 app.use('/accounts', accounts.router);
 app.use('/admin/accounts', accounts.administration(authentication.requireAdministrator));
+const mediaRequests = createMediaRequests(redisClient, { accounts, authentication,
+  readInstances: () => redisClient.json.get(process.env.INSTANCE_FILE) });
+app.use('/requests', mediaRequests.router);
 
 app.get('/color', (req, res) => {
   (async () => {
@@ -93,6 +97,10 @@ app.listen(port, () => {
       accounts.deliverInvitations().catch(() => console.error('Invitation delivery unavailable.'));
     }, 10000);
     mailTimer.unref();
+    const requestTimer = setInterval(() => {
+      mediaRequests.refresh().catch(() => console.error('Media request refresh unavailable.'));
+    }, 60000);
+    requestTimer.unref();
 
     console.log('RedisService initialized');
     console.log(`App listening on port ${port}`);
