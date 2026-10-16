@@ -17,12 +17,13 @@ export async function passwordRecord(username, password) {
   return { username, salt, passwordHash: hash.toString('hex'), version: randomBytes(32).toString('hex') };
 }
 
-export function createAuthentication(redis, { legacyKey = process.env.AUTH_LEGACY_CRYPT_KEY } = {}) {
+export function createAuthentication(redis, { legacyKey = process.env.AUTH_LEGACY_CRYPT_KEY, accounts } = {}) {
   const router = Router();
   const read = () => redis.json.get('auth');
   const sessionKey = token => `flix:session:${digest(token)}`;
   async function authenticated(req, auth) {
-    if (!enabled(auth)) return true;
+    if (accounts && await accounts.principal(req)) return false;
+    if (!enabled(auth)) return !(accounts && await accounts.hasAccounts());
     const header = req.get('Authorization') ?? '';
     if (!/^Bearer [a-f0-9]{64}$/.test(header)) return false;
     const stored = await redis.get(sessionKey(header.slice(7)));
@@ -46,12 +47,18 @@ export function createAuthentication(redis, { legacyKey = process.env.AUTH_LEGAC
     res.json({ enabled: enabled(auth), ...(await authenticated(req, auth) && enabled(auth) ? { username: auth.username } : {}) });
   });
   router.get('/session', async (req, res) => {
+    const user = accounts && await accounts.principal(req);
+    if (user) return res.json({ enabled: true, authenticated: true, role: 'user', user });
     const auth = await read();
     res.json({ enabled: enabled(auth), authenticated: await authenticated(req, auth) });
   });
   router.post('/session', async (req, res) => {
+    if (accounts && await accounts.login(req, res)) return;
     const auth = await read();
-    if (!enabled(auth)) return res.json({ enabled: false, authenticated: true });
+    if (!enabled(auth)) {
+      if (accounts && await accounts.hasAccounts()) return res.status(503).json({ error: 'Authentication unavailable.' });
+      return res.json({ enabled: false, authenticated: true });
+    }
     const limitKey = `flix:login:${digest(req.ip ?? 'unknown')}`;
     const attempts = await redis.incr(limitKey);
     if (attempts === 1) await redis.expire(limitKey, 900);
@@ -89,6 +96,7 @@ export function createAuthentication(redis, { legacyKey = process.env.AUTH_LEGAC
     return issue(res, current);
   });
   router.delete('/session', async (req, res) => {
+    if (accounts) await accounts.logout(req);
     const header = req.get('Authorization') ?? '';
     if (/^Bearer [a-f0-9]{64}$/.test(header)) await redis.del(sessionKey(header.slice(7)));
     res.sendStatus(204);
@@ -101,11 +109,22 @@ export function createAuthentication(redis, { legacyKey = process.env.AUTH_LEGAC
     return issue(res, auth);
   });
   router.delete('/auth', requireSession, async (req, res) => {
-    await redis.json.del('auth');
+    if (accounts) {
+      if (!await accounts.disableAuthentication()) return res.status(409).json({ error: 'Revoke pending invitations and disable guest accounts before disabling authentication.' });
+    } else await redis.json.del('auth');
     res.sendStatus(204);
   });
   router.use((error, _req, res, _next) => {
+    if ([400, 409, 429].includes(error.status)) return res.status(error.status).json({ error: error.message });
     res.status(503).json({ error: 'Authentication unavailable.' });
   });
-  return { router, requireSession };
+  const requireAdministrator = async (req, res, next) => {
+    try {
+      const auth = await read();
+      if (!enabled(auth)) return res.status(403).json({ error: 'Enable administrator authentication before inviting users.' });
+      if (!await authenticated(req, auth)) return res.status(403).json({ error: 'Administrator access required.' });
+      next();
+    } catch { res.status(503).json({ error: 'Authentication unavailable.' }); }
+  };
+  return { router, requireSession, requireAdministrator };
 }

@@ -1,5 +1,6 @@
 import express from 'express';
 import { createAuthentication } from './auth.js';
+import { createAccounts } from './accounts.js';
 import cors from 'cors';
 import * as fs from 'fs';
 import { createClient } from 'redis';
@@ -29,8 +30,11 @@ redisClient.on('error', (err) => {
   console.error('Redis error:', err);
 });
 
-const authentication = createAuthentication(redisClient);
+const accounts = createAccounts(redisClient);
+const authentication = createAuthentication(redisClient, { accounts });
 app.use(authentication.router);
+app.use('/accounts', accounts.router);
+app.use('/admin/accounts', accounts.administration(authentication.requireAdministrator));
 
 app.get('/color', (req, res) => {
   (async () => {
@@ -83,6 +87,12 @@ app.listen(port, () => {
 
     const data = fs.readFileSync('./' + process.env.INSTANCE_FILE, 'utf8');
     await redisClient.json.set(process.env.INSTANCE_FILE, '$', JSON.parse(data));
+
+    // Redis-backed outbox survives restarts; a lease prevents concurrent senders.
+    const mailTimer = setInterval(() => {
+      accounts.deliverInvitations().catch(() => console.error('Invitation delivery unavailable.'));
+    }, 10000);
+    mailTimer.unref();
 
     console.log('RedisService initialized');
     console.log(`App listening on port ${port}`);

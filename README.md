@@ -123,6 +123,55 @@ To measure the actual movie, series and download filesystems, deploy the
 [storage agent](storage-agent/README.md) on their host. It uses read-only mounts
 and a bearer token, without access to the Docker socket.
 
+### User Invitations (API Required)
+
+This first stage adds invited accounts, administrator/user permissions and Mailjet
+invitation delivery. Media requests and request notifications are not implemented
+yet. Existing administrator credentials and sessions remain compatible. Guests
+cannot read `/instances`, storage, download clients or administrator settings.
+The administrator must enable authentication before creating invitations.
+
+Configure these variables **in the API container environment**, never in `VITE_*`:
+
+```dotenv
+MAILJET_API_KEY=your-public-api-key
+MAILJET_SECRET_KEY=your-secret-api-key
+MAIL_FROM_EMAIL=flix@example.com
+MAIL_FROM_NAME=Flix
+FLIX_PUBLIC_URL=https://flix.example.com
+```
+
+Use an address/domain verified in Mailjet. The implementation uses
+[Mailjet Send API v3.1](https://dev.mailjet.com/docs/email-api/send-api-v31/send-basic-email),
+including per-message result validation. Use HTTPS for an externally accessible
+deployment. Persist and back up Redis: accounts and the invitation outbox use
+Redis, not `instances.json`.
+
+Administrators manage invitations and guest access from **Users** in the webapp.
+Guests sign in using their email in the username field. Invitations expire after
+seven days, are single-use and cannot choose their role or recipient email.
+Passwords use scrypt, sessions are stored by token hash, and access revocation
+invalidates all the user's sessions. Authentication cannot be disabled while
+active guests or pending invitations remain.
+If the administrator record is lost while guests/invitations remain, protected
+routes fail closed rather than reverting to public access; restore that record
+from the Redis backup.
+
+Invitation creation queues mail without waiting for Mailjet. A worker checks the
+durable outbox every ten seconds, with a Redis lease across API replicas. Failed
+sends retry with exponential backoff, up to five attempts. Delivery status is
+visible in **Users**; use Refresh to update it. After a permanent failure, revoke
+the invitation and create another. Delivery is at-least-once: a crash after
+Mailjet acceptance can send the same invitation email again, but the link still
+only creates one account. `sent` means Mailjet accepted the message, not that the
+recipient inbox received it.
+
+Invitation tokens are hashed for validation and encrypted in the pending outbox
+using a key derived from `MAILJET_SECRET_KEY`. Rotating that secret requires
+revoking and recreating queued invitations. The acceptance link carries its
+secret in a URL fragment, which the webapp clears on opening. Do not share
+invitation links publicly.
+
 ### Tests
 
 ```sh
