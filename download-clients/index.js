@@ -15,8 +15,10 @@ export function configuredClients(instance) {
   return clients;
 }
 
-export async function trackedDownloads(instances, fetchService = fetch) {
+export async function downloadProtection(instances, fetchService = fetch) {
   const tracked = new Set();
+  const blocked = new Map();
+  let unidentifiedImport = false;
   // Check every configured instance: multiple instances can share a download client.
   for (const instance of instances) for (const service of [instance.radarr, instance.sonarr]) {
     if (!service?.base_url || !service.api_key) throw new Error('Cannot verify download tracking');
@@ -40,12 +42,43 @@ export async function trackedDownloads(instances, fetchService = fetch) {
         if (!Number.isSafeInteger(record?.id) || recordIds.has(record.id)
           || typeof record.downloadId !== 'string' || !record.downloadId.trim()) throw new Error('Unknown download identity');
         recordIds.add(record.id);
-        tracked.add(record.downloadId.toLowerCase());
+        const id = record.downloadId.trim().toLowerCase();
+        tracked.add(id);
+        const state = typeof record.trackedDownloadState === 'string' ? record.trackedDownloadState.toLowerCase() : '';
+        if (state === 'importing') blocked.set(id, 'Import in progress');
+        else if (state === 'importpending') blocked.set(id, 'Import queued');
+        else if (!['downloading', 'importblocked', 'imported', 'failedpending', 'failed', 'ignored', 'importfailed'].includes(state)) {
+          blocked.set(id, 'Import status unavailable');
+        }
       }
       count += data.records.length;
       if (count === expected) break;
       if (!data.records.length || count > expected || page === 100) throw new Error('Incomplete queue response');
     }
+    url.pathname = url.pathname.replace(/\/queue$/, '/command');
+    url.search = '';
+    const response = await fetchService(url, { headers: { 'X-Api-Key': service.api_key }, redirect: 'error', signal });
+    if (!response.ok) throw new Error('Cannot verify import commands');
+    const commands = await response.json();
+    if (!Array.isArray(commands)) throw new Error('Invalid import commands');
+    for (const command of commands) {
+      if (!command || typeof command.name !== 'string' || typeof command.status !== 'string') throw new Error('Invalid command state');
+      const name = command.name.toLowerCase();
+      if (!['manualimport', 'downloadedmoviesscan', 'downloadedepisodesscan'].includes(name)) continue;
+      const status = command.status.toLowerCase();
+      if (['completed', 'failed', 'aborted', 'cancelled'].includes(status)) continue;
+      if (!['queued', 'started'].includes(status)) { unidentifiedImport = true; continue; }
+      const body = command.body;
+      const ids = name === 'manualimport'
+        ? (Array.isArray(body?.files) && body.files.length ? body.files.map(file => file?.downloadId) : [])
+        : [body?.downloadClientId];
+      if (!ids.length || ids.some(id => typeof id !== 'string' || !id.trim())) {
+        // Paths cannot be safely compared across different container/remote path mappings.
+        unidentifiedImport = true;
+        continue;
+      }
+      for (const id of ids) blocked.set(id.trim().toLowerCase(), status === 'queued' ? 'Import queued' : 'Import in progress');
+    }
   }
-  return tracked;
+  return { tracked, reason: id => blocked.get(id.toLowerCase()) ?? (unidentifiedImport ? 'Import status unavailable' : null) };
 }

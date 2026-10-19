@@ -66,11 +66,16 @@ The API now protects instances, storage, download clients and settings writes.
 Direct Radarr/Sonarr browser connections retain their existing API-key model.
 
 Before each removal, Flix rereads the torrent and every configured instance's
-Radarr/Sonarr queues, including all pages. Incomplete torrents and unverifiable
-tracking remain blocked. Completed tracked torrents require an explicit force
-confirmation (DELETE body `force: true`); this may interrupt import and does not
-clear Radarr/Sonarr queue entries or remove media from the library. The optional
-force flag must be boolean. It never bypasses permissions to delete files.
+Radarr/Sonarr queues, including all pages, and their commands. Importing and
+import-pending torrents, queued/running ManualImport commands and download scans
+cannot be removed, even with `force: true` or when keeping data. Unavailable or
+invalid verification blocks cleanup. Active imports without a reliable download
+ID conservatively block all cleanup; paths cannot be matched safely across remote
+path mappings. Completed/failed commands no longer block removal. The API reports
+`removalBlockedReason` (null when verified clear) without exposing command paths.
+Completed tracked torrents without an import lock still require explicit force
+confirmation. This does not clear queue entries or remove media from the library.
+The force flag must be boolean and never bypasses import protection or data permissions.
 
 Untracked does not prove import completion or that deletion is safe. Uncertain
 write results are never retried automatically. No cross-service atomic transaction
