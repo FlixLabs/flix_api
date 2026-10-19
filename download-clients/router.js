@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { configuredClients, connectors, trackedDownloads } from './index.js';
+import { configuredClients, connectors, downloadProtection } from './index.js';
 
 export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) {
   const router = Router();
@@ -17,11 +17,13 @@ export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) 
   });
   router.get('/download-clients/:instance', async (req, res) => {
     try {
-      const tracked = await trackedDownloads(res.locals.instances, fetchRemote);
+      const protection = await downloadProtection(res.locals.instances, fetchRemote);
+      const { tracked } = protection;
       const clients = await Promise.all(res.locals.clients.map(async config => {
         const adapter = await connectors[config.type].connect(config, fetchRemote);
         const torrents = (await adapter.list()).map(item => ({ ...item, tracked: tracked.has(item.id),
-          removable: item.completed && !tracked.has(item.id) }));
+          removalBlockedReason: protection.reason(item.id),
+          removable: item.completed && !tracked.has(item.id) && !protection.reason(item.id) }));
         return { id: config.id, name: config.name, type: config.type, allowDeleteData: config.allow_delete_data === true, allowForceRemoval: true, torrents };
       }));
       res.json({ clients });
@@ -41,7 +43,9 @@ export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) 
       const adapter = await connectors[config.type].connect(config, fetchRemote);
       const item = (await adapter.list()).find(item => item.id === req.params.torrent);
       if (!item || item.name !== name || !item.completed) return res.status(409).json({ error: 'Torrent changed, disappeared or is not complete. Refresh the list.' });
-      const tracked = await trackedDownloads(res.locals.instances, fetchRemote);
+      const protection = await downloadProtection(res.locals.instances, fetchRemote);
+      if (protection.reason(item.id)) return res.status(409).json({ error: `${protection.reason(item.id)}. Removal is blocked, including forced removal.` });
+      const { tracked } = protection;
       if (tracked.has(item.id) && !force) return res.status(409).json({ error: 'Radarr or Sonarr still tracks this torrent. Use its download actions instead.' });
       attempted = true;
       await adapter.remove(item.id, deleteData);

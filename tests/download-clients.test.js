@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import express from 'express';
 import { createDownloadClientsRouter } from '../download-clients/router.js';
 import { publicInstances } from '../storage.js';
-import { trackedDownloads, configuredClients } from '../download-clients/index.js';
+import { downloadProtection, configuredClients } from '../download-clients/index.js';
 import { connectDeluge } from '../download-clients/connectors/deluge.js';
 import { createAuthentication, passwordRecord, authenticationFingerprint } from '../auth.js';
 import { authStore } from './helpers/auth-store.js';
@@ -22,9 +22,14 @@ function remote(settings = {}) {
   const fetchRemote = async (url, options) => {
     url = new URL(url);
     if (url.pathname !== '/json') {
+      if (url.pathname.endsWith('/command')) {
+        calls.push({ commands: true, url });
+        if (settings.commandFailure) return new Response('private upstream error', { status: 503 });
+        return Response.json(settings.commands ?? []);
+      }
       calls.push({ queue: true, url });
       if (settings.queueFailure) return new Response('private upstream error', { status: 503 });
-      return Response.json({ totalRecords: settings.tracked ? 1 : 0, records: settings.tracked ? [{ id: 1, downloadId: hash.toUpperCase() }] : [] });
+      return Response.json({ totalRecords: settings.tracked ? 1 : 0, records: settings.tracked ? [{ id: 1, downloadId: hash.toUpperCase(), trackedDownloadState: settings.state ?? 'importBlocked' }] : [] });
     }
     const body = JSON.parse(options.body); calls.push(body);
     assert.equal(options.redirect, 'error');
@@ -148,19 +153,82 @@ test('uncertain removals are not retried and are reported explicitly', async t =
 test('tracking checks all instances and all queue pages', async () => {
   let reads = 0;
   const records = Array.from({ length: 100 }, (_, i) => ({ id: i + 1, downloadId: `download-${i}` }));
-  const result = await trackedDownloads([instance, instance], async url => {
+  const result = await downloadProtection([instance, instance], async url => {
+    if (new URL(url).pathname.endsWith('/command')) return Response.json([]);
     reads++;
     return Response.json({ totalRecords: 101, records: new URL(url).searchParams.get('page') === '1' ? records : [{ id: 101, downloadId: hash }] });
   });
-  assert.equal(reads, 8); assert.equal(result.has(hash), true);
+  assert.equal(reads, 8); assert.equal(result.tracked.has(hash), true);
+  assert.equal(result.reason(hash), 'Import status unavailable');
 });
 test('unverifiable or incomplete tracking never grants cleanup permission', async () => {
   for (const data of [{ records: [], totalRecords: 1 }, { records: [{}], totalRecords: 1 }, { records: [] }]) {
-    await assert.rejects(trackedDownloads([instance], async () => Response.json(data)));
+    await assert.rejects(downloadProtection([instance], async () => Response.json(data)));
   }
 });
 test('Deluge URLs cannot redirect credentials or use unsupported schemes', async () => {
   for (const base_url of ['file:///private', 'http://user:password@host', 'http://host?key=secret']) {
     await assert.rejects(connectDeluge({ ...client, base_url }, async () => { throw new Error('Must not fetch'); }));
   }
+});
+
+test('queue imports and unknown states block even forced removal, with or without data deletion', async t => {
+  for (const state of ['importing', 'importPending', 'unknown']) {
+    const settings = { tracked: true, state };
+    const { url, send, calls } = await server(t, settings, [{ ...instance, download_clients: [{ ...client, allow_delete_data: true }] }]);
+    const data = await (await fetch(url, { headers: { Authorization: `Bearer ${token}` } })).json();
+    assert.ok(data.clients[0].torrents[0].removalBlockedReason);
+    assert.equal(data.clients[0].torrents[0].removable, false);
+    for (const deleteData of [false, true]) assert.equal((await send({ name: torrent.name, deleteData, force: true })).status, 409);
+    assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+  }
+});
+
+test('queued and running manual imports protect even untracked torrents', async t => {
+  for (const status of ['queued', 'started']) {
+    const { send, calls } = await server(t, { commands: [{ name: 'ManualImport', status, body: { files: [{ downloadId: hash.toUpperCase() }] } }] });
+    assert.equal((await send({ name: torrent.name, deleteData: false, force: true })).status, 409);
+    assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+  }
+});
+
+test('completed and failed commands do not permanently lock cleanup', async t => {
+  for (const status of ['completed', 'failed', 'aborted', 'cancelled']) {
+    const { send } = await server(t, { commands: [{ name: 'ManualImport', status, body: { files: [{ downloadId: hash }] } }] });
+    assert.equal((await send()).status, 204);
+  }
+});
+
+test('unidentified imports, unknown command states and unavailable command reads fail closed', async t => {
+  for (const settings of [
+    { commands: [{ name: 'ManualImport', status: 'started', body: { files: [{ path: '/remote/path/film.mkv' }] } }] },
+    { commands: [{ name: 'DownloadedMoviesScan', status: 'queued', body: { path: '/remote/downloads' } }] },
+    { commands: [{ name: 'ManualImport', status: 'unknown' }] },
+    { commands: [{ name: 'ManualImport', status: 'orphaned' }] },
+    { commandFailure: true }, { commands: {} },
+  ]) {
+    const { send, calls } = await server(t, settings);
+    assert.notEqual((await send({ name: torrent.name, deleteData: false, force: true })).status, 204);
+    assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+  }
+});
+
+test('download scans protect only the identified torrent, not unrelated imports', async t => {
+  for (const name of ['DownloadedMoviesScan', 'DownloadedEpisodesScan']) {
+    const active = await server(t, { commands: [{ name, status: 'started', body: { downloadClientId: hash } }] });
+    assert.equal((await active.send()).status, 409);
+    const unrelated = await server(t, { commands: [{ name, status: 'started', body: { downloadClientId: 'other-download' } }] });
+    assert.equal((await unrelated.send()).status, 204);
+  }
+});
+
+test('all configured services are checked and removal revalidates after the displayed snapshot', async t => {
+  const settings = { commands: [] };
+  const { url, send, calls } = await server(t, settings);
+  const data = await (await fetch(url, { headers: { Authorization: `Bearer ${token}` } })).json();
+  assert.equal(data.clients[0].torrents[0].removalBlockedReason, null);
+  settings.commands = [{ name: 'ManualImport', status: 'queued', body: { files: [{ downloadId: hash }] } }];
+  assert.equal((await send({ name: torrent.name, deleteData: false, force: true })).status, 409);
+  assert.equal(calls.filter(call => call.commands).length, 4);
+  assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
 });
