@@ -13,6 +13,11 @@ Flix API provides a connector-based interface for inspecting completed torrents.
 Deluge is the first supported connector; qBittorrent and Transmission are not yet
 implemented. Existing Radarr/Sonarr download actions remain independent.
 
+If a Radarr/Sonarr protection check is unavailable, client inspection remains
+available in read-only mode (`trackingVerified: false`). No torrent is reported
+removable, including forced removals. Every DELETE still rechecks all configured
+services and fails closed if any import/tracking state cannot be verified.
+
 Add these optional fields to an instance in `instances.json`:
 
 ```json
