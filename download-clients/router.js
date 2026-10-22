@@ -17,14 +17,16 @@ export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) 
   });
   router.get('/download-clients/:instance', async (req, res) => {
     try {
-      const protection = await downloadProtection(res.locals.instances, fetchRemote);
-      const { tracked } = protection;
+      // Inspection remains read-only when a shared service cannot be verified.
+      // DELETE below still requires a fresh, successful protection check.
+      const protection = await downloadProtection(res.locals.instances, fetchRemote).catch(() => null);
       const clients = await Promise.all(res.locals.clients.map(async config => {
         const adapter = await connectors[config.type].connect(config, fetchRemote);
-        const torrents = (await adapter.list()).map(item => ({ ...item, tracked: tracked.has(item.id),
-          removalBlockedReason: protection.reason(item.id),
-          removable: item.completed && !tracked.has(item.id) && !protection.reason(item.id) }));
-        return { id: config.id, name: config.name, type: config.type, allowDeleteData: config.allow_delete_data === true, allowForceRemoval: true, torrents };
+        const torrents = (await adapter.list()).map(item => ({ ...item, tracked: protection?.tracked.has(item.id) ?? false,
+          removalBlockedReason: protection ? protection.reason(item.id) : 'Import status unavailable',
+          removable: !!protection && item.completed && !protection.tracked.has(item.id) && !protection.reason(item.id) }));
+        return { id: config.id, name: config.name, type: config.type, trackingVerified: !!protection,
+          allowDeleteData: config.allow_delete_data === true, allowForceRemoval: !!protection, torrents };
       }));
       res.json({ clients });
     } catch { res.status(502).json({ error: 'Unable to inspect clients or verify Radarr/Sonarr queues. No cleanup is allowed.' }); }

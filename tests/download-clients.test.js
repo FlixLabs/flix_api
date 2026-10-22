@@ -21,6 +21,7 @@ function remote(settings = {}) {
   const calls = [];
   const fetchRemote = async (url, options) => {
     url = new URL(url);
+    if (url.hostname === settings.unavailableHost) throw new Error('private upstream unreachable');
     if (url.pathname !== '/json') {
       if (url.pathname.endsWith('/command')) {
         calls.push({ commands: true, url });
@@ -85,9 +86,46 @@ test('lists safe normalized capabilities without leaking passwords or cookies', 
   assert.equal(result.headers.get('cache-control'), 'no-store');
   const data = await result.json();
   assert.equal(data.clients[0].allowDeleteData, false);
+  assert.equal(data.clients[0].trackingVerified, true);
   assert.equal(data.clients[0].torrents[0].removable, true);
   assert.ok(!JSON.stringify(data).includes('private'));
   assert.ok(!JSON.stringify(data).includes('test-session'));
+});
+test('inspection stays available when another instance is unreachable, but removals remain blocked', async t => {
+  const offline = { ...instance, name: 'Offline', download_clients: [],
+    radarr: { ...service, base_url: 'http://offline.test' } };
+  const { url, send, calls } = await server(t, { unavailableHost: 'offline.test' }, [instance, offline]);
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 200);
+  const data = await response.json();
+  assert.equal(data.clients[0].trackingVerified, false);
+  assert.equal(data.clients[0].allowForceRemoval, false);
+  assert.equal(data.clients[0].torrents[0].name, torrent.name);
+  assert.equal(data.clients[0].torrents[0].removable, false);
+  assert.equal(data.clients[0].torrents[0].removalBlockedReason, 'Import status unavailable');
+  assert.ok(!JSON.stringify(data).includes('private'));
+  assert.equal((await send({ name: torrent.name, deleteData: false, force: true })).status, 502);
+  assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+});
+
+test('queue and command verification failures allow read-only inspection and recover on refresh', async t => {
+  for (const settings of [{ queueFailure: true }, { commandFailure: true }]) {
+    const { url } = await server(t, settings);
+    const read = () => fetch(url, { headers: { Authorization: `Bearer ${token}` } }).then(response => response.json());
+    assert.equal((await read()).clients[0].trackingVerified, false);
+    settings.queueFailure = false;
+    settings.commandFailure = false;
+    const recovered = (await read()).clients[0];
+    assert.equal(recovered.trackingVerified, true);
+    assert.equal(recovered.torrents[0].removable, true);
+  }
+});
+
+test('daemon failures still return a sanitized inspection error', async t => {
+  const { url } = await server(t, { login: false });
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 502);
+  assert.ok(!(await response.text()).includes('private'));
 });
 test('removes only the selected torrent and keeps data by default', async t => {
   const { send, calls } = await server(t);
