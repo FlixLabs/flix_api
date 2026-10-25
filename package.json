@@ -1,6 +1,6 @@
 {
   "name": "flix_api",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "",
   "author": "Renaud Baivier",
   "private": true,
@@ -20,6 +20,6 @@
     "redis": "^5.12.1"
   },
   "engines": {
-    "node": ">=24 <25"
+    "node": ">=24.22.1 <25"
   }
 }
