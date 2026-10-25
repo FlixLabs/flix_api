@@ -1,4 +1,4 @@
-FROM node:24-bookworm-slim AS build
+FROM node:24.22.1-bookworm-slim AS build
 
 WORKDIR /api
 
@@ -8,7 +8,7 @@ RUN yarn install --frozen-lockfile --production=true
 COPY . .
 RUN yarn test
 
-FROM node:24-bookworm-slim
+FROM node:24.22.1-bookworm-slim
 
 WORKDIR /api
 
