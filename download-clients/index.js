@@ -4,6 +4,20 @@ import { rejectedExtension } from './extension-rejection.js';
 // Additional clients implement the same list/remove contract, without changing the UI.
 export const connectors = Object.freeze({ deluge: { connect: connectDeluge, validId: validTorrentId } });
 
+// Unknown cross-service queue entries can explicitly decline any import ownership.
+function explicitlySkippedUnknownDownload(record, type) {
+  const service = type === 'movies' ? 'Radarr' : 'Sonarr';
+  return record.status?.toLowerCase() === 'completed'
+    && record.trackedDownloadState?.toLowerCase() === 'downloading'
+    && record.trackedDownloadStatus?.toLowerCase() === 'warning'
+    && (record.errorMessage == null || record.errorMessage === '')
+    && record.movieId == null && record.seriesId == null && record.episodeId == null
+    && record.movie == null && record.series == null && record.episode == null
+    && Array.isArray(record.statusMessages) && record.statusMessages.length > 0
+    && record.statusMessages.every(group => Array.isArray(group?.messages) && group.messages.length > 0
+      && group.messages.every(message => message === `Download wasn't grabbed by ${service} and not in a category, Skipping.`));
+}
+
 export function configuredClients(instance) {
   const clients = instance.download_clients;
   if (!Array.isArray(clients) || !clients.length) throw new Error('No download clients configured');
@@ -52,7 +66,7 @@ export async function downloadProtection(instances, fetchService = fetch) {
         if (extension !== null) {
           if (extensions.has(key) && extensions.get(key) !== extension) repairBlocked.set(id, 'Conflicting file rejections');
           extensions.set(key, extension);
-        } else repairBlocked.set(id, 'Download is not rejected for an unsupported extension');
+        } else if (!explicitlySkippedUnknownDownload(record, type)) repairBlocked.set(id, 'Download is not rejected for an unsupported extension');
         const state = typeof record.trackedDownloadState === 'string' ? record.trackedDownloadState.toLowerCase() : '';
         if (state === 'importing') blocked.set(id, 'Import in progress');
         else if (state === 'importpending') blocked.set(id, 'Import queued');

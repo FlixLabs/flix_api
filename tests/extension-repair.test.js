@@ -22,8 +22,10 @@ function setup() {
     progress: 100, identity: 'f'.repeat(64), size: 1024, inspectionSize: 1024, renamed: false, uncertain: false, retained: false, count: 1 };
   const fetchRemote = async (value, init = {}) => {
     const url = new URL(value);
-    if (url.pathname.endsWith('/queue')) return Response.json({ totalRecords: url.hostname === 'radarr.test' && settings.queue ? 1 : 0,
-      records: url.hostname === 'radarr.test' && settings.queue ? [settings.queue] : [] });
+    if (url.pathname.endsWith('/queue')) {
+      const record = url.hostname === 'radarr.test' ? settings.queue : settings.sonarrQueue;
+      return Response.json({ totalRecords: record ? 1 : 0, records: record ? [record] : [] });
+    }
     if (url.pathname.endsWith('/command')) return Response.json(settings.commands);
     if (url.hostname === 'agent.test') {
       if (settings.oldAgent) return Response.json({}, { status: 404 });
@@ -81,6 +83,37 @@ test('capability is opt-in and never publishes mappings or secrets', () => {
   assert.equal(publicData.storage_agent, undefined);
   assert.equal(publicData.download_clients, undefined);
   assert.equal(publicInstances([{ ...instance, download_clients: [{ ...client, downloads_root: undefined }] }])[0].has_download_extension_repair, undefined);
+});
+const skippedSonarr = { ...rejection, trackedDownloadState: 'downloading', statusMessages: [{
+  title: filename, messages: ["Download wasn't grabbed by Sonarr and not in a category, Skipping."],
+}] };
+test('an explicitly skipped unknown Sonarr download does not block a verified Radarr extension repair', async () => {
+  const mock = setup();
+  mock.settings.sonarrQueue = skippedSonarr;
+  const proposal = await mock.review();
+  assert.equal(mock.writes().length, 0);
+  assert.deepEqual(await mock.repair(proposal), { status: 'renamed' });
+  assert.equal(mock.writes().length, 1);
+});
+test('other tracked resources, ambiguous states and active imports still block a shared download repair', async () => {
+  for (const changes of [{ seriesId: 2 }, { movieId: 1 }, { episodeId: 3 }, { series: {} },
+    { status: 'downloading' }, { trackedDownloadState: 'importPending' }, { trackedDownloadState: 'importing' },
+    { trackedDownloadState: 'unknown' }, { trackedDownloadStatus: 'ok' }, { errorMessage: 'Import unavailable' },
+    { statusMessages: [] }, { statusMessages: [{ messages: ["Download wasn't grabbed by Sonarr and not in a category, Skipping.", 'Waiting for import'] }] }]) {
+    const mock = setup();
+    mock.settings.sonarrQueue = { ...skippedSonarr, ...changes };
+    await assert.rejects(mock.review(), { code: 'IMPORT_PROTECTED' });
+    assert.equal(mock.writes().length, 0);
+  }
+  for (const command of [{ name: 'DownloadedEpisodesScan', status: 'queued', body: { downloadClientId: hash } },
+    { name: 'ManualImport', status: 'started', body: {} }]) {
+    const mock = setup();
+    mock.settings.sonarrQueue = skippedSonarr;
+    const proposal = await mock.review();
+    mock.settings.commands = [command];
+    await assert.rejects(mock.repair(proposal), { code: 'IMPORT_PROTECTED' });
+    assert.equal(mock.writes().length, 0);
+  }
 });
 test('also supports a filename with no suffix at all, without interpreting it as pending', async () => {
   const { settings, review, repair, writes } = setup();
