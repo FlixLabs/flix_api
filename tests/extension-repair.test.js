@@ -137,10 +137,18 @@ test('refuses missing mappings, outside paths, multiple files, wrong sizes and a
   settings.path = filename; settings.inspectionSize = 2;
   await assert.rejects(review(), { code: 'FILE_FORMAT_UNSUPPORTED' });
   settings.inspectionSize = 1024; settings.path = filename + '.mkv';
-  await assert.rejects(review(), { code: 'FILE_IDENTITY_CHANGED' });
+  await assert.rejects(review(), { code: 'FILE_EXTENSION_ALREADY_VALID' });
   settings.path = filename; settings.customName = 'Custom torrent name';
   await assert.rejects(review(), { code: 'FILE_IDENTITY_CHANGED' });
   assert.equal(writes().length, 0);
+});
+test('a stale service rejection cannot rename an already corrected Deluge file twice', async () => {
+  const mock = setup();
+  const proposal = await mock.review();
+  assert.deepEqual(await mock.repair(proposal), { status: 'renamed' });
+  await assert.rejects(mock.review(), { code: 'FILE_EXTENSION_ALREADY_VALID' });
+  assert.equal(mock.settings.path, filename + '.mkv');
+  assert.equal(mock.writes().length, 1);
 });
 test('rechecks identity, rejection, completion, expiration and commands before writing', async () => {
   for (const change of [s => { s.identity = 'e'.repeat(64); }, s => { s.queue = null; },
