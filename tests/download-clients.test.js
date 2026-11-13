@@ -77,6 +77,11 @@ test('unauthenticated reads and writes never contact upstream services', async t
   const { url, send, calls } = await server(t);
   assert.equal((await fetch(url)).status, 401);
   assert.equal((await send(undefined, 'wrong')).status, 401);
+  for (const action of ['review', 'repair']) {
+    assert.equal((await fetch(`${url}/extension-${action}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    })).status, 401);
+  }
   assert.deepEqual(calls, []);
 });
 test('lists safe normalized capabilities without leaking passwords or cookies', async t => {

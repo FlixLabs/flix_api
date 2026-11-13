@@ -1,9 +1,11 @@
 import { Router } from 'express';
 import { configuredClients, connectors, downloadProtection } from './index.js';
+import { createExtensionRepair } from './extension-repair.js';
 
 export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) {
   const router = Router();
   const locks = new Set();
+  const extensions = createExtensionRepair({ fetchRemote, locks });
   router.use('/download-clients/:instance', async (req, res, next) => {
     res.set('Cache-Control', 'no-store');
     try {
@@ -11,9 +13,18 @@ export function createDownloadClientsRouter(loadInstances, fetchRemote = fetch) 
       const instance = instances?.find(item => item.name === req.params.instance);
       if (!instance) return res.status(404).json({ error: 'Instance not found.' });
       res.locals.instances = instances;
+      res.locals.instance = instance;
       res.locals.clients = configuredClients(instance);
       next();
     } catch { res.status(503).json({ error: 'Download clients configuration unavailable.' }); }
+  });
+  for (const action of ['review', 'repair']) router.post(`/download-clients/:instance/extension-${action}`, async (req, res) => {
+    try {
+      res.json(await extensions[action](res.locals.instance, res.locals.clients, res.locals.instances, req.body));
+    } catch (cause) {
+      const code = cause.status ? cause.code : 'REPAIR_VERIFICATION_UNAVAILABLE';
+      res.status(cause.status ?? 502).json({ code, error: 'Extension repair could not be safely completed. Check the download before trying again.' });
+    }
   });
   router.get('/download-clients/:instance', async (req, res) => {
     try {

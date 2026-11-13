@@ -37,6 +37,40 @@ Merge these fields into your existing instance; keep its name, Radarr and Sonarr
 Restart/redeploy the API to reload it. Deluge Web must already be connected to the
 intended daemon; the URL is the Web UI base URL without /json.
 
+### Correcting a Missing Matroska Extension
+
+Deploy the updated webapp, API and storage agent. Keep the agent mounts read-only.
+For each supported Deluge client, explicitly add `downloads_root` to its existing
+configuration. This is the absolute root **as seen by Deluge**, corresponding
+exactly to the host directory mounted at the agent's `/storage/downloads`:
+
+```json
+"downloads_root": "/home/vision/downloads"
+```
+
+This is an example, not a default: verify both paths on your deployment. Do not
+change the existing `storage_agent` URL/token or expose them to the browser.
+Restart the API after editing `instances.json`, and rebuild/recreate the agent.
+Without this opt-in mapping, no extension repair action is advertised.
+
+In Downloads, a completed torrent explicitly rejected for an unsupported extension
+can offer **Correct file extension**. Verification supports only single-file
+torrents. The agent reads at most 64 KiB of the header and requires the Matroska
+EBML DocType (not merely EBML/WebM). Container detection does not validate the
+video content. It refuses symlinks, paths outside downloads, non-regular files,
+changed files and existing `.mkv` targets. The API also checks the mapped file size.
+
+Confirmation appends `.mkv` through Deluge's `core.rename_files`; the agent never
+writes. A short-lived, single-use review is revalidated against fresh torrent,
+file and service-import state. Custom torrent names inconsistent with their
+top-level file path are refused, and Deluge's resulting name is also checked
+because Radarr derives its output path from that name. Queued/running or unidentified imports block this
+action, even when the original queue state was `importPending`. Removal protection
+is unchanged. The RPC is sent once and its result is checked in Deluge; an uncertain
+result requires manual inspection before a new verification. No import is forced,
+no torrent is removed and no data is deleted. A lost/restarted API review expires
+safely. Radarr/Sonarr may retry automatic import on a subsequent normal check.
+
 Download clients use the Flix login session, not a separate access token. The old
 `download_clients_token` can be removed from instances.json (it is ignored and never
 returned). The webapp loads clients when the panel opens.
