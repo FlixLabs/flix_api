@@ -1,8 +1,26 @@
 # Storage Agent
 
 Install this agent on the host running Radarr, Sonarr and the download client.
-It reads filesystem capacity, not directory sizes or file contents. No Docker
-socket, SSH access or privileged mode is required.
+It measures filesystem capacity. Its optional authenticated media inspection
+reads only a bounded file header under the downloads mount; it never writes,
+renames or imports files. No Docker socket, SSH access or privileged mode is required.
+
+## Read-Only Media Inspection
+
+`GET /media-format?path=RELATIVE_DOWNLOAD_PATH` uses the same agent bearer token.
+The Flix API derives the path from Deluge, using an explicitly configured
+`downloads_root` mapping; the browser cannot supply a filesystem path for repair.
+See [extension repair setup](../README.md#correcting-a-missing-matroska-extension).
+The endpoint is restricted to the configured downloads mount, rejects symlinks,
+traversal, non-regular files and existing `.mkv` targets, and reads at most 64 KiB.
+It requires an explicit Matroska EBML DocType and returns a file identity and size
+for revalidation, not file contents. This is container detection, not a guarantee
+that video streams are valid. Unknown formats fail closed. One inspection runs at
+a time. Failure replies do not disclose host paths or raw filesystem errors.
+
+Keep all mounts and the container read-only. Deluge, not this agent, performs any
+user-confirmed rename. This endpoint requires rebuilding/recreating the agent;
+older agents still support storage measurements but cannot inspect media headers.
 
 ## Configure on the Storage Host
 

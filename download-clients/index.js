@@ -1,4 +1,5 @@
 import { connectDeluge, validTorrentId } from './connectors/deluge.js';
+import { rejectedExtension } from './extension-rejection.js';
 
 // Additional clients implement the same list/remove contract, without changing the UI.
 export const connectors = Object.freeze({ deluge: { connect: connectDeluge, validId: validTorrentId } });
@@ -18,9 +19,11 @@ export function configuredClients(instance) {
 export async function downloadProtection(instances, fetchService = fetch) {
   const tracked = new Set();
   const blocked = new Map();
+  const repairBlocked = new Map();
+  const extensions = new Map();
   let unidentifiedImport = false;
   // Check every configured instance: multiple instances can share a download client.
-  for (const instance of instances) for (const service of [instance.radarr, instance.sonarr]) {
+  for (const instance of instances) for (const [type, service] of [['movies', instance.radarr], ['series', instance.sonarr]]) {
     if (!service?.base_url || !service.api_key) throw new Error('Cannot verify download tracking');
     const url = new URL(service.base_url);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Invalid service URL');
@@ -44,6 +47,12 @@ export async function downloadProtection(instances, fetchService = fetch) {
         recordIds.add(record.id);
         const id = record.downloadId.trim().toLowerCase();
         tracked.add(id);
+        const extension = rejectedExtension(record);
+        const key = JSON.stringify([instance.name, type, id]);
+        if (extension !== null) {
+          if (extensions.has(key) && extensions.get(key) !== extension) repairBlocked.set(id, 'Conflicting file rejections');
+          extensions.set(key, extension);
+        } else repairBlocked.set(id, 'Download is not rejected for an unsupported extension');
         const state = typeof record.trackedDownloadState === 'string' ? record.trackedDownloadState.toLowerCase() : '';
         if (state === 'importing') blocked.set(id, 'Import in progress');
         else if (state === 'importpending') blocked.set(id, 'Import queued');
@@ -77,8 +86,14 @@ export async function downloadProtection(instances, fetchService = fetch) {
         unidentifiedImport = true;
         continue;
       }
-      for (const id of ids) blocked.set(id.trim().toLowerCase(), status === 'queued' ? 'Import queued' : 'Import in progress');
+      for (const id of ids) {
+        const reason = status === 'queued' ? 'Import queued' : 'Import in progress';
+        blocked.set(id.trim().toLowerCase(), reason);
+        repairBlocked.set(id.trim().toLowerCase(), reason);
+      }
     }
   }
-  return { tracked, reason: id => blocked.get(id.toLowerCase()) ?? (unidentifiedImport ? 'Import status unavailable' : null) };
+  return { tracked, reason: id => blocked.get(id.toLowerCase()) ?? (unidentifiedImport ? 'Import status unavailable' : null),
+    repairReason: id => repairBlocked.get(id.toLowerCase()) ?? (unidentifiedImport ? 'Import status unavailable' : null),
+    rejectedExtension: (instance, type, id) => extensions.get(JSON.stringify([instance, type, id.toLowerCase()])) };
 }

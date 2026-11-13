@@ -24,6 +24,18 @@ export async function connectDeluge(config, fetchClient = fetch) {
   if (await rpc('auth.login', [config.password]) !== true || !cookie) throw new Error('Client authentication failed');
   if (await rpc('web.connected', []) !== true) throw new Error('Connect the Deluge Web UI to its daemon first');
   return {
+    async files(id) {
+      if (!validTorrentId(id)) throw new Error('Invalid torrent');
+      const data = await rpc('core.get_torrent_status', [id, ['files', 'save_path', 'name']]);
+      if (!Array.isArray(data?.files) || typeof data.save_path !== 'string' || typeof data.name !== 'string') throw new Error('Invalid files');
+      return { savePath: data.save_path, files: data.files, name: data.name };
+    },
+    async renameFile(id, index, path) {
+      if (!validTorrentId(id) || !Number.isSafeInteger(index) || index < 0 || typeof path !== 'string') throw new Error('Invalid rename');
+      // Deluge acknowledges this asynchronous operation with null, not a success boolean.
+      const result = await rpc('core.rename_files', [id, [[index, path]]]);
+      if (result !== null) throw new Error('Unexpected rename response');
+    },
     async list() {
       const data = await rpc('core.get_torrents_status', [{}, keys]);
       if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('Invalid torrent list');
