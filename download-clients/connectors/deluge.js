@@ -32,7 +32,7 @@ export async function connectDeluge(config, fetchClient = fetch) {
           || typeof item.state !== 'string' || !Number.isFinite(item.progress) || item.progress < 0 || item.progress > 100
           || typeof item.is_finished !== 'boolean' || !Number.isFinite(item.total_size) || item.total_size < 0) throw new Error('Invalid torrent');
         return { id: id.toLowerCase(), name: item.name, state: item.state, progress: item.progress,
-          completed: item.is_finished && item.progress === 100 && ['Seeding', 'Paused'].includes(item.state), sizeBytes: item.total_size,
+          completed: item.is_finished && item.progress === 100 && ['Seeding', 'Paused', 'Queued'].includes(item.state), sizeBytes: item.total_size,
           path: typeof item.save_path === 'string' ? item.save_path : '',
           ratio: Number.isFinite(item.ratio) && item.ratio >= 0 ? item.ratio : null };
       });

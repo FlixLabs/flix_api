@@ -133,6 +133,47 @@ test('removes only the selected torrent and keeps data by default', async t => {
   assert.deepEqual(calls.filter(call => call.method === 'core.remove_torrent').map(call => call.params), [[hash, false]]);
   assert.equal(calls.filter(call => call.queue).length, 2);
 });
+test('lists completed queued torrents and allows confirmed removal without deleting data', async t => {
+  const { url, send, calls } = await server(t, { torrent: { state: 'Queued' } });
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  assert.equal(response.status, 200);
+  const item = (await response.json()).clients[0].torrents[0];
+  assert.equal(item.state, 'Queued');
+  assert.equal(item.completed, true);
+  assert.equal(item.removable, true);
+  assert.equal((await send()).status, 204);
+  assert.deepEqual(calls.filter(call => call.method === 'core.remove_torrent').map(call => call.params), [[hash, false]]);
+});
+test('queued torrents must be finished and at 100 percent before cleanup', async t => {
+  for (const changes of [
+    { progress: 50, is_finished: false }, { progress: 100, is_finished: false },
+    { progress: 99, is_finished: true },
+  ]) {
+    const { url, send, calls } = await server(t, { torrent: { state: 'Queued', ...changes } });
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const item = (await response.json()).clients[0].torrents[0];
+    assert.equal(item.completed, false);
+    assert.equal(item.removable, false);
+    assert.equal((await send({ name: torrent.name, deleteData: false, force: true })).status, 409);
+    assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+  }
+});
+test('completed queued torrents retain tracking and active import protection', async t => {
+  for (const state of ['importBlocked', 'importPending', 'importing', 'unknown']) {
+    const { url, send, calls } = await server(t, { torrent: { state: 'Queued' }, tracked: true, state });
+    const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const item = (await response.json()).clients[0].torrents[0];
+    assert.equal(item.completed, true);
+    assert.equal(item.tracked, true);
+    assert.equal(item.removable, false);
+    assert.equal((await send()).status, 409);
+    if (state !== 'importBlocked') {
+      assert.ok(item.removalBlockedReason);
+      assert.equal((await send({ name: torrent.name, deleteData: false, force: true })).status, 409);
+    }
+    assert.ok(!calls.some(call => call.method === 'core.remove_torrent'));
+  }
+});
 test('data removal needs both explicit boolean consent and server permission', async t => {
   const denied = await server(t);
   assert.equal((await denied.send({ name: torrent.name, deleteData: true })).status, 403);
