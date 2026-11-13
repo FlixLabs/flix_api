@@ -37,8 +37,9 @@ export function createExtensionRepair({ fetchRemote, locks, now = Date.now }) {
     const details = await adapter.files(downloadId);
     if (details.files.length !== 1 || !posix.isAbsolute(details.savePath) || details.savePath !== item.path) throw error('SINGLE_FILE_REQUIRED', 422);
     const file = details.files[0];
-    if (!safeRelativePath(file.path) || file.index !== 0 || !Number.isSafeInteger(file.size) || file.size <= 0
-      || posix.extname(file.path) !== extension || /\.(?:mkv|mp4|avi|webm|m4v|mov|ts|m2ts)$/i.test(file.path)) throw error('FILE_IDENTITY_CHANGED');
+    if (!safeRelativePath(file.path) || file.index !== 0 || !Number.isSafeInteger(file.size) || file.size <= 0) throw error('FILE_IDENTITY_CHANGED');
+    if (/\.(?:mkv|mp4|avi|webm|m4v|mov|ts|m2ts)$/i.test(file.path)) throw error('FILE_EXTENSION_ALREADY_VALID');
+    if (posix.extname(file.path) !== extension) throw error('FILE_IDENTITY_CHANGED');
     // Radarr derives the output path from Deluge's torrent name. A custom name
     // could otherwise keep pointing at the old path after a successful rename.
     if (details.name !== item.name || item.name !== file.path.split('/')[0]) throw error('FILE_IDENTITY_CHANGED');
